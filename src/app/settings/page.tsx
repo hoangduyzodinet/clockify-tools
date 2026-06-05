@@ -309,21 +309,21 @@ export default function SettingsPage() {
               {settings.githubRepos.length > 0 && (
                 <div className="mb-3 space-y-2">
                   {settings.githubRepos.map((r, i) => (
-                    <div key={i} className="flex items-center gap-2">
+                    <div key={i} className="grid grid-cols-[9rem_1rem_minmax(8rem,1fr)_2rem] items-center gap-2">
                       <input
                         type="text"
                         value={r.owner}
                         onChange={(e) => updateRepo(i, 'owner', e.target.value)}
                         placeholder="owner"
-                        className="w-36 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                       />
-                      <span className="text-slate-300">/</span>
+                      <span className="text-center text-slate-300">/</span>
                       <input
                         type="text"
                         value={r.repo}
                         onChange={(e) => updateRepo(i, 'repo', e.target.value)}
                         placeholder="repository"
-                        className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
                       />
                       <button
                         onClick={() => removeRepo(i)}
