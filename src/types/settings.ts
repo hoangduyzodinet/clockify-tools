@@ -1,7 +1,7 @@
 export type AiProvider = 'openai' | 'gemini';
 export type ScheduleMode = 'byDate' | 'fillWeek';
 
-export type RepoTarget = { owner: string; repo: string };
+export type RepoTarget = { owner: string; repo: string; branches?: string[] };
 
 export type AppSettings = {
   githubToken: string;

@@ -5,6 +5,7 @@ export type FetchCommitsInput = {
   token: string;
   owner: string;
   repo: string;
+  branch?: string;
   since: string;
   until: string;
   author?: string;
@@ -33,6 +34,7 @@ export async function fetchGithubCommits(input: FetchCommitsInput): Promise<Comm
       repo: input.repo,
       since: new Date(input.since).toISOString(),
       until: new Date(input.until).toISOString(),
+      sha: input.branch?.trim() || undefined,
       author: input.author || undefined,
       per_page: 100,
     })

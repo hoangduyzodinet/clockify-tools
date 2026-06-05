@@ -9,6 +9,7 @@ import { DraftTask, ClockifySyncResult } from '@/types/clockify';
 import { commitsToDraftTasks, applyGeneratedTitles, allWorkdaysInRange } from '@/lib/draft-tasks';
 import { ApiResponse } from '@/lib/api-response';
 import { CommitGroup } from '@/lib/ai-titles';
+import { GithubBranchesData } from '@/app/api/github/branches/route';
 
 function localDateStr(d: Date) {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
@@ -32,10 +33,14 @@ export default function HomePage() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
 
   // Repos list for this fetch session (pre-filled from settings)
-  const [repos, setRepos] = useState<RepoTarget[]>([{ owner: '', repo: '' }]);
+  const [repos, setRepos] = useState<RepoTarget[]>([{ owner: '', repo: '', branches: [] }]);
   const [author, setAuthor] = useState('');
   const [startDate, setStartDate] = useState(weekAgo());
   const [endDate, setEndDate] = useState(today());
+  const [repoBranches, setRepoBranches] = useState<Record<number, string[]>>({});
+  const [branchSearch, setBranchSearch] = useState<Record<number, string>>({});
+  const [loadingBranches, setLoadingBranches] = useState<Record<number, boolean>>({});
+  const [openBranchPicker, setOpenBranchPicker] = useState<number | null>(null);
 
   // Data
   const [commits, setCommits] = useState<CommitItem[]>([]);
@@ -59,6 +64,7 @@ export default function HomePage() {
   const [syncError, setSyncError] = useState('');
 
   const groupingGenRef = useRef(0);
+  const branchPickerRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   useEffect(() => {
     const s = loadSettings();
@@ -78,22 +84,96 @@ export default function HomePage() {
     }
   }, []);
 
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (openBranchPicker === null) return;
+      const picker = branchPickerRefs.current[openBranchPicker];
+      if (picker && !picker.contains(e.target as Node)) {
+        setOpenBranchPicker(null);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [openBranchPicker]);
+
   const missingGitHub = !settings.githubToken;
   const missingClockify = !settings.clockifyApiKey || !settings.clockifyWorkspaceId;
   const validRepos = repos.filter((r) => r.owner.trim() && r.repo.trim());
   const canFetch = validRepos.length > 0 && startDate && endDate && !loadingCommits;
   const selectedTasks = tasks.filter((t) => t.selected);
 
-  function updateRepo(idx: number, field: keyof RepoTarget, value: string) {
+  function updateRepo(idx: number, field: keyof RepoTarget, value: string | string[]) {
     setRepos((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+    if (field === 'owner' || field === 'repo') {
+      setRepoBranches((prev) => {
+        const next = { ...prev };
+        delete next[idx];
+        return next;
+      });
+      setBranchSearch((prev) => {
+        const next = { ...prev };
+        delete next[idx];
+        return next;
+      });
+      setOpenBranchPicker((openIdx) => (openIdx === idx ? null : openIdx));
+    }
+  }
+
+  function toggleBranch(idx: number, branch: string) {
+    const current = repos[idx]?.branches ?? [];
+    const next = current.includes(branch)
+      ? current.filter((item) => item !== branch)
+      : [...current, branch];
+    updateRepo(idx, 'branches', next);
+  }
+
+  function clearBranches(idx: number) {
+    updateRepo(idx, 'branches', []);
+  }
+
+  function branchSummary(branches?: string[]) {
+    if (!branches?.length) return 'Default branch';
+    if (branches.length === 1) return branches[0];
+    return `${branches.length} branches selected`;
+  }
+
+  async function loadBranches(idx: number) {
+    const repoTarget = repos[idx];
+    if (!settings.githubToken || !repoTarget?.owner.trim() || !repoTarget.repo.trim()) return;
+
+    setOpenBranchPicker(idx);
+    if (repoBranches[idx]) return;
+
+    setLoadingBranches((prev) => ({ ...prev, [idx]: true }));
+    try {
+      const res = await fetch('/api/github/branches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: settings.githubToken,
+          owner: repoTarget.owner.trim(),
+          repo: repoTarget.repo.trim(),
+        }),
+      });
+      const data: ApiResponse<GithubBranchesData> = await res.json();
+      if (!data.ok) throw new Error(data.error.message);
+      setRepoBranches((prev) => ({ ...prev, [idx]: data.data.branches.map((branch) => branch.name) }));
+    } catch {
+      setRepoBranches((prev) => ({ ...prev, [idx]: [] }));
+    } finally {
+      setLoadingBranches((prev) => ({ ...prev, [idx]: false }));
+    }
   }
 
   function addRepo() {
-    setRepos((prev) => [...prev, { owner: '', repo: '' }]);
+    setRepos((prev) => [...prev, { owner: '', repo: '', branches: [] }]);
   }
 
   function removeRepo(idx: number) {
-    setRepos((prev) => (prev.length === 1 ? [{ owner: '', repo: '' }] : prev.filter((_, i) => i !== idx)));
+    setRepos((prev) =>
+      prev.length === 1 ? [{ owner: '', repo: '', branches: [] }] : prev.filter((_, i) => i !== idx),
+    );
   }
 
   async function fetchCommits() {
@@ -103,8 +183,14 @@ export default function HomePage() {
     setTasks([]);
     setSyncResults(null);
 
+    const fetchTargets = validRepos.flatMap((r) => {
+      const selectedBranches = r.branches?.filter((branch) => branch.trim()) ?? [];
+      const branches = selectedBranches.length > 0 ? selectedBranches : [undefined];
+      return branches.map((branch) => ({ ...r, branch }));
+    });
+
     const results = await Promise.allSettled(
-      validRepos.map((r) =>
+      fetchTargets.map((r) =>
         fetch('/api/commits', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -112,6 +198,7 @@ export default function HomePage() {
             token: settings.githubToken,
             owner: r.owner.trim(),
             repo: r.repo.trim(),
+            branch: r.branch?.trim() || undefined,
             since: new Date(`${startDate}T00:00:00`).toISOString(),
             until: new Date(`${endDate}T23:59:59`).toISOString(),
             author: author.trim() || undefined,
@@ -125,7 +212,9 @@ export default function HomePage() {
 
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
-      const label = `${validRepos[i].owner}/${validRepos[i].repo}`;
+      const repoTarget = fetchTargets[i];
+      const branchLabel = repoTarget.branch?.trim() ? `#${repoTarget.branch.trim()}` : '';
+      const label = `${repoTarget.owner}/${repoTarget.repo}${branchLabel}`;
       if (result.status === 'fulfilled') {
         const data = result.value;
         if (data.ok) {
@@ -347,29 +436,130 @@ export default function HomePage() {
           <label className="mb-1.5 block text-sm font-medium text-slate-700">Repositories</label>
           <div className="space-y-2">
             {repos.map((r, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={r.owner}
-                  onChange={(e) => updateRepo(i, 'owner', e.target.value)}
-                  placeholder="owner"
-                  className="w-36 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:outline-none"
-                />
-                <span className="text-slate-400">/</span>
-                <input
-                  type="text"
-                  value={r.repo}
-                  onChange={(e) => updateRepo(i, 'repo', e.target.value)}
-                  placeholder="repository"
-                  className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:outline-none"
-                />
-                <button
-                  onClick={() => removeRepo(i)}
-                  className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                  title="Remove"
-                >
-                  ×
-                </button>
+              <div key={i} className="space-y-1.5">
+                <div className="grid grid-cols-[9rem_1rem_minmax(8rem,0.8fr)_minmax(12rem,1.2fr)_2rem] items-center gap-2">
+                  <input
+                    type="text"
+                    value={r.owner}
+                    onChange={(e) => updateRepo(i, 'owner', e.target.value)}
+                    placeholder="owner"
+                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:outline-none"
+                  />
+                  <span className="text-center text-slate-400">/</span>
+                  <input
+                    type="text"
+                    value={r.repo}
+                    onChange={(e) => updateRepo(i, 'repo', e.target.value)}
+                    placeholder="repository"
+                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:outline-none"
+                  />
+                  <div
+                    className="relative"
+                    ref={(el) => {
+                      branchPickerRefs.current[i] = el;
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (openBranchPicker === i && repoBranches[i]) {
+                          setOpenBranchPicker(null);
+                        } else {
+                          loadBranches(i);
+                        }
+                      }}
+                      disabled={!settings.githubToken || !r.owner.trim() || !r.repo.trim()}
+                      aria-expanded={openBranchPicker === i}
+                      className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-left text-sm focus:ring-2 focus:ring-slate-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400"
+                      title={!settings.githubToken ? 'Configure GitHub token in Settings first' : undefined}
+                    >
+                      <span className="block truncate">{loadingBranches[i] ? 'Loading branches…' : branchSummary(r.branches)}</span>
+                    </button>
+                    {openBranchPicker === i && repoBranches[i] && (
+                      <div className="absolute top-full left-0 z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-100 p-2">
+                          <input
+                            type="text"
+                            value={branchSearch[i] ?? ''}
+                            onChange={(e) => setBranchSearch((prev) => ({ ...prev, [i]: e.target.value }))}
+                            placeholder="Search branches…"
+                            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:ring-2 focus:ring-slate-400 focus:outline-none"
+                          />
+                        </div>
+                        <div className="max-h-56 overflow-y-auto p-1">
+                          <button
+                            type="button"
+                            onClick={() => clearBranches(i)}
+                            className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-slate-50 ${
+                              !r.branches?.length ? 'font-medium text-slate-900' : 'text-slate-600'
+                            }`}
+                          >
+                            <span className="flex h-4 w-4 items-center justify-center rounded border border-slate-300 text-xs">
+                              {!r.branches?.length && '✓'}
+                            </span>
+                            Default branch
+                          </button>
+                          {(repoBranches[i] ?? [])
+                            .filter((branch) =>
+                              branch.toLowerCase().includes((branchSearch[i] ?? '').toLowerCase()),
+                            )
+                            .map((branch) => {
+                              const selected = r.branches?.includes(branch) ?? false;
+                              return (
+                                <button
+                                  key={branch}
+                                  type="button"
+                                  onClick={() => toggleBranch(i, branch)}
+                                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-slate-50 ${
+                                    selected ? 'font-medium text-slate-900' : 'text-slate-600'
+                                  }`}
+                                >
+                                  <span
+                                    className={`flex h-4 w-4 items-center justify-center rounded border text-xs ${
+                                      selected
+                                        ? 'border-slate-800 bg-slate-800 text-white'
+                                        : 'border-slate-300'
+                                    }`}
+                                  >
+                                    {selected && '✓'}
+                                  </span>
+                                  <span className="truncate">{branch}</span>
+                                </button>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => removeRepo(i)}
+                    className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
+                {!!r.branches?.length && (
+                  <div className="ml-[10rem] flex flex-wrap gap-1.5 pr-10">
+                    {r.branches.map((branch) => (
+                      <span
+                        key={branch}
+                        className="inline-flex max-w-full items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700"
+                      >
+                        <span className="truncate">{branch}</span>
+                        <button
+                          type="button"
+                          onClick={() => toggleBranch(i, branch)}
+                          className="rounded-full px-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                          aria-label={`Remove ${branch}`}
+                          title={`Remove ${branch}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
