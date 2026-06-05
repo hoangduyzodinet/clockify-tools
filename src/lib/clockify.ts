@@ -1,4 +1,10 @@
-import { DraftTask, ClockifyProject, ClockifySyncResult, ClockifyUser, ClockifyWorkspace } from '@/types/clockify';
+import {
+  DraftTask,
+  ClockifyProject,
+  ClockifySyncResult,
+  ClockifyUser,
+  ClockifyWorkspace,
+} from '@/types/clockify';
 import { localDatetimeToIso } from '@/lib/draft-tasks';
 
 const CLOCKIFY_BASE_URL = 'https://api.clockify.me/api/v1';
@@ -54,15 +60,19 @@ export async function syncClockifyTimeEntries({
 
   for (const task of tasks) {
     try {
-      const entry = await clockifyRequest<{ id: string }>(apiKey, `/workspaces/${workspaceId}/time-entries`, {
-        method: 'POST',
-        body: JSON.stringify({
-          start: localDatetimeToIso(task.start),
-          end: localDatetimeToIso(task.end),
-          description: task.title,
-          projectId,
-        }),
-      });
+      const entry = await clockifyRequest<{ id: string }>(
+        apiKey,
+        `/workspaces/${workspaceId}/time-entries`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            start: localDatetimeToIso(task.start),
+            end: localDatetimeToIso(task.end),
+            description: task.title,
+            projectId,
+          }),
+        },
+      );
 
       results.push({ draftTaskId: task.id, ok: true, message: 'Synced', timeEntryId: entry.id });
     } catch (error) {

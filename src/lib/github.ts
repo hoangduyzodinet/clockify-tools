@@ -23,7 +23,8 @@ export async function fetchGithubCommits(input: FetchCommitsInput): Promise<Comm
 
   return commits.map((item) => {
     const message = item.commit.message || '';
-    const date = item.commit.author?.date || item.commit.committer?.date || new Date().toISOString();
+    const date =
+      item.commit.author?.date || item.commit.committer?.date || new Date().toISOString();
 
     return {
       sha: item.sha,

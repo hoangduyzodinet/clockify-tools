@@ -27,7 +27,7 @@ export default function SettingsPage() {
     if (s.clockifyApiKey) {
       connectClockify(s.clockifyApiKey, s.clockifyWorkspaceId);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function connectClockify(apiKey: string, savedWorkspaceId?: string) {
@@ -103,10 +103,10 @@ export default function SettingsPage() {
       <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
 
       {/* GitHub */}
-      <section className="rounded-lg border border-slate-200 bg-white p-6 space-y-4">
+      <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">
         <div>
           <h2 className="text-base font-semibold text-slate-800">GitHub</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="mt-0.5 text-xs text-slate-500">
             Personal access token with <code className="font-mono">repo</code> read scope.
           </p>
         </div>
@@ -148,10 +148,10 @@ export default function SettingsPage() {
       </section>
 
       {/* Clockify */}
-      <section className="rounded-lg border border-slate-200 bg-white p-6 space-y-4">
+      <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">
         <div>
           <h2 className="text-base font-semibold text-slate-800">Clockify</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="mt-0.5 text-xs text-slate-500">
             Find your API key at clockify.me → Profile Settings → API.
           </p>
         </div>
@@ -165,12 +165,12 @@ export default function SettingsPage() {
               onChange={(e) => update('clockifyApiKey', e.target.value)}
               placeholder="your-clockify-api-key"
               autoComplete="off"
-              className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
+              className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:outline-none"
             />
             <button
               onClick={() => connectClockify(settings.clockifyApiKey)}
               disabled={!settings.clockifyApiKey || connecting}
-              className="whitespace-nowrap rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+              className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium whitespace-nowrap text-white hover:bg-slate-700 disabled:opacity-50"
             >
               {connecting ? 'Connecting…' : 'Connect'}
             </button>
@@ -227,10 +227,10 @@ export default function SettingsPage() {
       </section>
 
       {/* AI */}
-      <section className="rounded-lg border border-slate-200 bg-white p-6 space-y-4">
+      <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">
         <div>
           <h2 className="text-base font-semibold text-slate-800">AI Title Generation</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="mt-0.5 text-xs text-slate-500">
             Optional. Used to rewrite commit messages into clean Clockify task titles.
           </p>
         </div>
@@ -270,7 +270,7 @@ export default function SettingsPage() {
         >
           Save Settings
         </button>
-        {saved && <span className="text-sm text-green-600 font-medium">Saved!</span>}
+        {saved && <span className="text-sm font-medium text-green-600">Saved!</span>}
       </div>
     </div>
   );

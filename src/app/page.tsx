@@ -162,12 +162,8 @@ export default function HomePage() {
       {/* Setup warnings */}
       {(missingGitHub || missingClockify) && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {missingGitHub && (
-            <span>GitHub token not configured. </span>
-          )}
-          {missingClockify && (
-            <span>Clockify API key or workspace not configured. </span>
-          )}
+          {missingGitHub && <span>GitHub token not configured. </span>}
+          {missingClockify && <span>Clockify API key or workspace not configured. </span>}
           <Link href="/settings" className="font-semibold underline">
             Go to Settings →
           </Link>
@@ -175,12 +171,12 @@ export default function HomePage() {
       )}
 
       {/* Step 1 — Fetch form */}
-      <section className="rounded-lg border border-slate-200 bg-white p-6 space-y-4">
+      <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">
         <h2 className="text-base font-semibold text-slate-800">1. Fetch GitHub Commits</h2>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Owner</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Owner</label>
             <input
               type="text"
               value={owner}
@@ -190,7 +186,7 @@ export default function HomePage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Repository</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Repository</label>
             <input
               type="text"
               value={repo}
@@ -200,7 +196,7 @@ export default function HomePage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Start Date</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Start Date</label>
             <input
               type="date"
               value={startDate}
@@ -209,7 +205,7 @@ export default function HomePage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">End Date</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">End Date</label>
             <input
               type="date"
               value={endDate}
@@ -218,9 +214,11 @@ export default function HomePage() {
             />
           </div>
           <div className="col-span-2">
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="mb-1 block text-sm font-medium text-slate-700">
               Author Filter{' '}
-              <span className="font-normal text-slate-400">(optional — GitHub username or email)</span>
+              <span className="font-normal text-slate-400">
+                (optional — GitHub username or email)
+              </span>
             </label>
             <input
               type="text"
@@ -246,14 +244,13 @@ export default function HomePage() {
 
       {/* Step 2 — Preview + edit */}
       {tasks.length > 0 && (
-        <section className="rounded-lg border border-slate-200 bg-white p-6 space-y-4">
+        <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-base font-semibold text-slate-800">
-                2. Review & Edit Tasks
-              </h2>
-              <p className="text-sm text-slate-500 mt-0.5">
-                {commits.length} commit{commits.length !== 1 ? 's' : ''} found. Edit titles, times, or deselect rows before syncing.
+              <h2 className="text-base font-semibold text-slate-800">2. Review & Edit Tasks</h2>
+              <p className="mt-0.5 text-sm text-slate-500">
+                {commits.length} commit{commits.length !== 1 ? 's' : ''} found. Edit titles, times,
+                or deselect rows before syncing.
               </p>
             </div>
 
@@ -266,9 +263,7 @@ export default function HomePage() {
                 >
                   {generating ? 'Generating…' : '✨ Generate AI Titles'}
                 </button>
-                {generateError && (
-                  <span className="text-xs text-red-600">{generateError}</span>
-                )}
+                {generateError && <span className="text-xs text-red-600">{generateError}</span>}
               </div>
             )}
           </div>
@@ -277,14 +272,14 @@ export default function HomePage() {
           <div className="flex gap-3 text-sm text-slate-500">
             <button
               onClick={() => toggleAll(true)}
-              className="hover:text-slate-800 underline underline-offset-2"
+              className="underline underline-offset-2 hover:text-slate-800"
             >
               Select all
             </button>
             <span>·</span>
             <button
               onClick={() => toggleAll(false)}
-              className="hover:text-slate-800 underline underline-offset-2"
+              className="underline underline-offset-2 hover:text-slate-800"
             >
               Deselect all
             </button>
@@ -297,12 +292,12 @@ export default function HomePage() {
           <div className="overflow-x-auto rounded-md border border-slate-100">
             <table className="w-full text-sm">
               <thead className="bg-slate-50">
-                <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
-                  <th className="px-3 py-2 w-8"></th>
+                <tr className="border-b border-slate-200 text-left text-xs font-medium tracking-wide text-slate-500 uppercase">
+                  <th className="w-8 px-3 py-2"></th>
                   <th className="px-3 py-2">Title</th>
-                  <th className="px-3 py-2 w-52">Start</th>
-                  <th className="px-3 py-2 w-52">End</th>
-                  <th className="px-3 py-2 w-20">Commit</th>
+                  <th className="w-52 px-3 py-2">Start</th>
+                  <th className="w-52 px-3 py-2">End</th>
+                  <th className="w-20 px-3 py-2">Commit</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -318,14 +313,14 @@ export default function HomePage() {
                           type="checkbox"
                           checked={task.selected}
                           onChange={(e) => updateTask(task.id, { selected: e.target.checked })}
-                          className="h-4 w-4 rounded border-slate-300 accent-slate-700 cursor-pointer"
+                          className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-slate-700"
                         />
                       </td>
                       <td className="px-3 py-2">
                         <input
                           value={task.title}
                           onChange={(e) => updateTask(task.id, { title: e.target.value })}
-                          className="w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 hover:border-slate-300 focus:border-slate-400 focus:outline-none focus:bg-white"
+                          className="w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 hover:border-slate-300 focus:border-slate-400 focus:bg-white focus:outline-none"
                         />
                         {task.generated && (
                           <span className="mt-0.5 block text-xs text-indigo-500">AI generated</span>
@@ -336,7 +331,7 @@ export default function HomePage() {
                           type="datetime-local"
                           value={task.start}
                           onChange={(e) => updateTask(task.id, { start: e.target.value })}
-                          className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-xs hover:border-slate-300 focus:border-slate-400 focus:outline-none focus:bg-white"
+                          className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-xs hover:border-slate-300 focus:border-slate-400 focus:bg-white focus:outline-none"
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -344,7 +339,7 @@ export default function HomePage() {
                           type="datetime-local"
                           value={task.end}
                           onChange={(e) => updateTask(task.id, { end: e.target.value })}
-                          className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-xs hover:border-slate-300 focus:border-slate-400 focus:outline-none focus:bg-white"
+                          className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-xs hover:border-slate-300 focus:border-slate-400 focus:bg-white focus:outline-none"
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -353,7 +348,7 @@ export default function HomePage() {
                             href={task.commitUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="font-mono text-xs text-slate-400 hover:text-slate-700 underline underline-offset-2"
+                            className="font-mono text-xs text-slate-400 underline underline-offset-2 hover:text-slate-700"
                             title={task.sourceMessage}
                           >
                             {task.commitSha.slice(0, 7)}
@@ -401,10 +396,11 @@ export default function HomePage() {
 
             {syncResults && (
               <span className="text-sm text-slate-600">
-                <span className="text-green-600 font-medium">{syncOk} synced</span>
+                <span className="font-medium text-green-600">{syncOk} synced</span>
                 {syncFailed > 0 && (
                   <>
-                    {' '}· <span className="text-red-600 font-medium">{syncFailed} failed</span>
+                    {' '}
+                    · <span className="font-medium text-red-600">{syncFailed} failed</span>
                   </>
                 )}
               </span>
@@ -415,7 +411,7 @@ export default function HomePage() {
 
       {/* Empty state after fetch with no results */}
       {!loadingCommits && commits.length === 0 && fetchError === '' && tasks.length === 0 && (
-        <div className="py-4 text-sm text-slate-400 text-center">
+        <div className="py-4 text-center text-sm text-slate-400">
           Enter a date range and repository above, then click Fetch Commits.
         </div>
       )}

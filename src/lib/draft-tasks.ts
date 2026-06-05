@@ -22,7 +22,10 @@ export function commitsToDraftTasks(commits: CommitItem[]): DraftTask[] {
   });
 }
 
-export function applyGeneratedTitles(tasks: DraftTask[], titles: Record<string, string>): DraftTask[] {
+export function applyGeneratedTitles(
+  tasks: DraftTask[],
+  titles: Record<string, string>,
+): DraftTask[] {
   return tasks.map((task) => ({
     ...task,
     title: titles[task.commitSha] || task.title,
