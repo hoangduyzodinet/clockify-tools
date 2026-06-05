@@ -84,7 +84,14 @@ export default function HomePage() {
       if (!data.ok) throw new Error(data.error.message);
 
       setCommits(data.data);
-      setTasks(commitsToDraftTasks(data.data));
+      setTasks(
+        commitsToDraftTasks(data.data, {
+          start: settings.workDayStart,
+          end: settings.workDayEnd,
+          mode: settings.scheduleMode,
+          workDays: settings.workDays,
+        }),
+      );
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : 'Failed to fetch commits');
     } finally {
@@ -96,13 +103,15 @@ export default function HomePage() {
     setGenerating(true);
     setGenerateError('');
 
+    const isGemini = settings.aiProvider === 'gemini';
     try {
       const res = await fetch('/api/generate-titles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          apiKey: settings.openAiApiKey,
-          model: settings.openAiModel,
+          provider: settings.aiProvider,
+          apiKey: isGemini ? settings.geminiApiKey : settings.openAiApiKey,
+          model: isGemini ? settings.geminiModel : settings.openAiModel,
           commits,
         }),
       });
@@ -254,7 +263,7 @@ export default function HomePage() {
               </p>
             </div>
 
-            {settings.openAiApiKey && (
+            {(settings.aiProvider === 'gemini' ? settings.geminiApiKey : settings.openAiApiKey) && (
               <div className="flex shrink-0 flex-col items-end gap-1">
                 <button
                   onClick={generateTitles}

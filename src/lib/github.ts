@@ -10,16 +10,35 @@ export type FetchCommitsInput = {
   author?: string;
 };
 
+function githubErrorMessage(err: unknown, owner: string, repo: string): string {
+  if (err && typeof err === 'object' && 'status' in err) {
+    const status = (err as { status: number }).status;
+    if (status === 401) return 'GitHub token is invalid or expired. Please update it in Settings.';
+    if (status === 403)
+      return `Access denied. Your GitHub token does not have permission to read ${owner}/${repo}.`;
+    if (status === 404)
+      return `Repository "${owner}/${repo}" not found. Check the owner/repo names and that your token has access.`;
+    if (status === 422)
+      return 'Invalid request — check that the author filter is a valid GitHub username or email.';
+  }
+  if (err instanceof Error) return err.message;
+  return 'Failed to fetch commits from GitHub';
+}
+
 export async function fetchGithubCommits(input: FetchCommitsInput): Promise<CommitItem[]> {
   const octokit = new Octokit({ auth: input.token });
-  const commits = await octokit.paginate(octokit.rest.repos.listCommits, {
-    owner: input.owner,
-    repo: input.repo,
-    since: new Date(input.since).toISOString(),
-    until: new Date(input.until).toISOString(),
-    author: input.author || undefined,
-    per_page: 100,
-  });
+  const commits = await octokit
+    .paginate(octokit.rest.repos.listCommits, {
+      owner: input.owner,
+      repo: input.repo,
+      since: new Date(input.since).toISOString(),
+      until: new Date(input.until).toISOString(),
+      author: input.author || undefined,
+      per_page: 100,
+    })
+    .catch((err) => {
+      throw new Error(githubErrorMessage(err, input.owner, input.repo));
+    });
 
   return commits.map((item) => {
     const message = item.commit.message || '';

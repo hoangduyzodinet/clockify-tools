@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { AppSettings, defaultSettings } from '@/types/settings';
+import { AppSettings, defaultSettings, ScheduleMode } from '@/types/settings';
 import { loadSettings, saveSettings } from '@/lib/local-storage';
 import { ClockifyUser, ClockifyWorkspace, ClockifyProject } from '@/types/clockify';
 import { ApiResponse } from '@/lib/api-response';
@@ -10,6 +10,11 @@ const OPENAI_MODELS = [
   { value: 'gpt-4o-mini', label: 'gpt-4o-mini — fast & cheap' },
   { value: 'gpt-4o', label: 'gpt-4o' },
   { value: 'gpt-4-turbo', label: 'gpt-4-turbo' },
+];
+
+const GEMINI_MODELS = [
+  { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash — fast & cheap' },
+  { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
 ];
 
 export default function SettingsPage() {
@@ -236,31 +241,223 @@ export default function SettingsPage() {
         </div>
 
         <div>
-          <label className={labelClass}>OpenAI API Key</label>
-          <input
-            type="password"
-            value={settings.openAiApiKey}
-            onChange={(e) => update('openAiApiKey', e.target.value)}
-            placeholder="sk-..."
-            autoComplete="off"
-            className={inputClass}
-          />
+          <label className={labelClass}>Provider</label>
+          <div className="flex gap-2">
+            {(['openai', 'gemini'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => update('aiProvider', p)}
+                className={`rounded-md border px-4 py-2 text-sm font-medium capitalize transition-colors ${
+                  settings.aiProvider === p
+                    ? 'border-slate-800 bg-slate-800 text-white'
+                    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {p === 'openai' ? 'OpenAI' : 'Gemini'}
+              </button>
+            ))}
+          </div>
         </div>
 
+        {settings.aiProvider === 'openai' && (
+          <>
+            <div>
+              <label className={labelClass}>OpenAI API Key</label>
+              <input
+                type="password"
+                value={settings.openAiApiKey}
+                onChange={(e) => update('openAiApiKey', e.target.value)}
+                placeholder="sk-..."
+                autoComplete="off"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Model</label>
+              <select
+                value={settings.openAiModel}
+                onChange={(e) => update('openAiModel', e.target.value)}
+                className={inputClass}
+              >
+                {OPENAI_MODELS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
+
+        {settings.aiProvider === 'gemini' && (
+          <>
+            <div>
+              <label className={labelClass}>Gemini API Key</label>
+              <input
+                type="password"
+                value={settings.geminiApiKey}
+                onChange={(e) => update('geminiApiKey', e.target.value)}
+                placeholder="AIza..."
+                autoComplete="off"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Model</label>
+              <select
+                value={settings.geminiModel}
+                onChange={(e) => update('geminiModel', e.target.value)}
+                className={inputClass}
+              >
+                {GEMINI_MODELS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* Task Schedule */}
+      <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">
         <div>
-          <label className={labelClass}>Model</label>
-          <select
-            value={settings.openAiModel}
-            onChange={(e) => update('openAiModel', e.target.value)}
-            className={inputClass}
-          >
-            {OPENAI_MODELS.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+          <h2 className="text-base font-semibold text-slate-800">Task Schedule</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Control how commit timestamps are mapped to Clockify time entries.
+          </p>
         </div>
+
+        {/* Schedule mode */}
+        <div>
+          <label className={labelClass}>Schedule mode</label>
+          <div className="flex gap-2">
+            {(
+              [
+                { value: 'byDate', label: 'By commit date', desc: 'Each day gets its own commits' },
+                {
+                  value: 'fillWeek',
+                  label: 'Fill work week',
+                  desc: 'Redistribute across Mon–Fri to fill each day',
+                },
+              ] as { value: ScheduleMode; label: string; desc: string }[]
+            ).map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => update('scheduleMode', opt.value)}
+                title={opt.desc}
+                className={`rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                  settings.scheduleMode === opt.value
+                    ? 'border-slate-800 bg-slate-800 text-white'
+                    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-slate-400">
+            {settings.scheduleMode === 'byDate'
+              ? 'Commits on each day are distributed evenly within the work window.'
+              : 'All commits are pooled and spread evenly across every configured workday in the date range.'}
+          </p>
+        </div>
+
+        {/* Work hours */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={labelClass}>Work day start</label>
+            <input
+              type="time"
+              value={settings.workDayStart}
+              onChange={(e) => update('workDayStart', e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>Work day end</label>
+            <input
+              type="time"
+              value={settings.workDayEnd}
+              onChange={(e) => update('workDayEnd', e.target.value)}
+              className={inputClass}
+            />
+          </div>
+        </div>
+
+        {/* Work days (only relevant for fillWeek) */}
+        {settings.scheduleMode === 'fillWeek' && (
+          <div>
+            <label className={labelClass}>Work days</label>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { label: 'Sun', value: 0 },
+                { label: 'Mon', value: 1 },
+                { label: 'Tue', value: 2 },
+                { label: 'Wed', value: 3 },
+                { label: 'Thu', value: 4 },
+                { label: 'Fri', value: 5 },
+                { label: 'Sat', value: 6 },
+              ].map((day) => {
+                const checked = settings.workDays.includes(day.value);
+                return (
+                  <button
+                    key={day.value}
+                    onClick={() => {
+                      const next = checked
+                        ? settings.workDays.filter((d) => d !== day.value)
+                        : [...settings.workDays, day.value].sort((a, b) => a - b);
+                      update('workDays', next);
+                    }}
+                    className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                      checked
+                        ? 'border-slate-800 bg-slate-800 text-white'
+                        : 'border-slate-300 bg-white text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    {day.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Summary */}
+        {(() => {
+          const [sh, sm] = settings.workDayStart.split(':').map(Number);
+          const [eh, em] = settings.workDayEnd.split(':').map(Number);
+          const dayMinutes = eh * 60 + em - (sh * 60 + sm);
+          const dayHours = dayMinutes / 60;
+          const numDays = settings.workDays.length;
+
+          if (dayMinutes <= 0) {
+            return <p className="text-xs text-red-500">End time must be after start time.</p>;
+          }
+
+          const h = Math.floor(dayMinutes / 60);
+          const m = dayMinutes % 60;
+          const perDay = `${h}h${m > 0 ? ` ${m}m` : ''}`;
+
+          if (settings.scheduleMode === 'fillWeek' && numDays > 0) {
+            const weekTotal = dayHours * numDays;
+            const wh = Math.floor(weekTotal);
+            const wm = Math.round((weekTotal - wh) * 60);
+            return (
+              <p className="text-xs text-slate-400">
+                {numDays} day{numDays !== 1 ? 's' : ''} × {perDay} ={' '}
+                <strong className="text-slate-600">
+                  {wh}h{wm > 0 ? ` ${wm}m` : ''}/week
+                </strong>
+              </p>
+            );
+          }
+
+          return (
+            <p className="text-xs text-slate-400">{perDay} per day — fills this window evenly.</p>
+          );
+        })()}
       </section>
 
       <div className="flex items-center gap-3">
