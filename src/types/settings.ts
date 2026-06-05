@@ -1,10 +1,16 @@
 export type AiProvider = 'openai' | 'gemini';
 export type ScheduleMode = 'byDate' | 'fillWeek';
 
+export type RepoTarget = { owner: string; repo: string };
+
 export type AppSettings = {
   githubToken: string;
+  githubUsername: string; // authenticated user's login, fetched from token
+  /** @deprecated use githubRepos */
   githubOwner: string;
+  /** @deprecated use githubRepos */
   githubRepo: string;
+  githubRepos: RepoTarget[];
   clockifyApiKey: string;
   clockifyWorkspaceId: string;
   clockifyProjectId: string;
@@ -18,12 +24,16 @@ export type AppSettings = {
   workDayEnd: string; // "HH:MM"
   scheduleMode: ScheduleMode;
   workDays: number[]; // 0=Sun, 1=Mon … 6=Sat
+  filterMergeCommits: boolean;
+  minTaskDurationMinutes: number;
 };
 
 export const defaultSettings: AppSettings = {
   githubToken: '',
+  githubUsername: '',
   githubOwner: '',
   githubRepo: '',
+  githubRepos: [],
   clockifyApiKey: '',
   clockifyWorkspaceId: '',
   clockifyProjectId: '',
@@ -37,4 +47,6 @@ export const defaultSettings: AppSettings = {
   workDayEnd: '18:00',
   scheduleMode: 'byDate',
   workDays: [1, 2, 3, 4, 5], // Mon–Fri
+  filterMergeCommits: true,
+  minTaskDurationMinutes: 60,
 };

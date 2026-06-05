@@ -7,6 +7,7 @@ export type WorkHours = {
   end: string; // "HH:MM"
   mode: ScheduleMode;
   workDays: number[]; // 0=Sun … 6=Sat
+  minDurationMinutes: number;
 };
 
 // ── date helpers ──────────────────────────────────────────────────────────────
@@ -33,6 +34,31 @@ function minutesToHHMM(totalMinutes: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+function nextCalendarDay(day: string): string {
+  const d = new Date(`${day}T00:00:00`);
+  d.setDate(d.getDate() + 1);
+  return localDateString(d);
+}
+
+function nextWorkday(day: string, workDays: number[]): string {
+  const d = new Date(`${day}T00:00:00`);
+  do {
+    d.setDate(d.getDate() + 1);
+  } while (!workDays.includes(d.getDay()));
+  return localDateString(d);
+}
+
+function allWorkdaysInRange(fromStr: string, toStr: string, workDays: number[]): string[] {
+  const days: string[] = [];
+  const current = new Date(`${fromStr}T00:00:00`);
+  const end = new Date(`${toStr}T00:00:00`);
+  while (current <= end) {
+    if (workDays.includes(current.getDay())) days.push(localDateString(current));
+    current.setDate(current.getDate() + 1);
+  }
+  return days;
+}
+
 // ── task building ─────────────────────────────────────────────────────────────
 
 function buildTasksFromByDay(byDay: Map<string, CommitItem[]>, wh: WorkHours): DraftTask[] {
@@ -51,7 +77,6 @@ function buildTasksFromByDay(byDay: Map<string, CommitItem[]>, wh: WorkHours): D
       const slotStart = startH * 60 + startM + i * slotMinutes;
       const slotEnd = slotStart + slotMinutes;
 
-      // No timezone suffix → parsed as local time by the browser
       const startDate = new Date(`${day}T${minutesToHHMM(slotStart)}:00`);
       const endDate = new Date(`${day}T${minutesToHHMM(slotEnd)}:00`);
 
@@ -65,6 +90,7 @@ function buildTasksFromByDay(byDay: Map<string, CommitItem[]>, wh: WorkHours): D
         commitUrl: commit.url,
         sourceMessage: commit.message,
         generated: false,
+        repo: commit.repo,
       });
     }
   }
@@ -72,76 +98,90 @@ function buildTasksFromByDay(byDay: Map<string, CommitItem[]>, wh: WorkHours): D
   return tasks.sort((a, b) => a.start.localeCompare(b.start));
 }
 
-// ── mode: byDate ──────────────────────────────────────────────────────────────
+// ── day-map builders ──────────────────────────────────────────────────────────
 
-function byDateMode(commits: CommitItem[], wh: WorkHours): DraftTask[] {
-  const byDay = new Map<string, CommitItem[]>();
-
-  for (const commit of commits) {
-    const day = localDateString(new Date(commit.date));
-    if (!byDay.has(day)) byDay.set(day, []);
-    byDay.get(day)!.push(commit);
-  }
-
-  for (const [day, dayCommits] of byDay) {
-    byDay.set(
-      day,
-      [...dayCommits].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
-    );
-  }
-
-  return buildTasksFromByDay(byDay, wh);
-}
-
-// ── mode: fillWeek ────────────────────────────────────────────────────────────
-
-function allWorkdaysInRange(fromStr: string, toStr: string, workDays: number[]): string[] {
-  const days: string[] = [];
-  // Parse as local midnight so getDay() returns the correct local weekday
-  const current = new Date(`${fromStr}T00:00:00`);
-  const end = new Date(`${toStr}T00:00:00`);
-
-  while (current <= end) {
-    if (workDays.includes(current.getDay())) {
-      days.push(localDateString(current));
-    }
-    current.setDate(current.getDate() + 1);
-  }
-
-  return days;
-}
-
-function fillWeekMode(commits: CommitItem[], wh: WorkHours): DraftTask[] {
+/**
+ * byDate mode: commits stay on their actual calendar day.
+ * If a day has more commits than maxPerDay, extras overflow to the next
+ * sequential calendar day (not skipping to the next day that already has commits).
+ */
+function buildDayMapByDate(commits: CommitItem[], maxPerDay: number): Map<string, CommitItem[]> {
   const sorted = [...commits].sort(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
   );
 
-  if (sorted.length === 0) return [];
+  const byDay = new Map<string, CommitItem[]>();
+  let currentDay: string | null = null;
+  let slotsUsed = 0;
+
+  for (const commit of sorted) {
+    const commitDay = localDateString(new Date(commit.date));
+
+    if (currentDay === null) {
+      currentDay = commitDay;
+      slotsUsed = 0;
+    } else if (slotsUsed >= maxPerDay) {
+      // Day full: move to next calendar day, but not before the commit's actual date
+      const next = nextCalendarDay(currentDay);
+      currentDay = next > commitDay ? next : commitDay;
+      slotsUsed = 0;
+    } else if (commitDay > currentDay) {
+      // Gap between days: jump to commit's actual date
+      currentDay = commitDay;
+      slotsUsed = 0;
+    }
+
+    if (!byDay.has(currentDay)) byDay.set(currentDay, []);
+    byDay.get(currentDay)!.push(commit);
+    slotsUsed++;
+  }
+
+  return byDay;
+}
+
+/**
+ * fillWeek mode: commits are pooled and spread across workdays sequentially.
+ * When a workday is full it overflows to the next workday (appending new
+ * workdays beyond the original range if needed).
+ */
+function buildDayMapFillWeek(
+  commits: CommitItem[],
+  wh: WorkHours,
+  maxPerDay: number,
+): Map<string, CommitItem[]> {
+  const sorted = [...commits].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+  );
+
+  if (sorted.length === 0) return new Map();
 
   const firstDay = localDateString(new Date(sorted[0].date));
   const lastDay = localDateString(new Date(sorted[sorted.length - 1].date));
 
   const workdays = allWorkdaysInRange(firstDay, lastDay, wh.workDays);
-
-  // Fall back to byDate when no configured workdays exist in the range
-  if (workdays.length === 0) return byDateMode(commits, wh);
-
-  // Distribute commits sequentially: earlier commits → earlier workdays
-  const baseCount = Math.floor(sorted.length / workdays.length);
-  const extra = sorted.length % workdays.length;
+  if (workdays.length === 0) return buildDayMapByDate(commits, maxPerDay);
 
   const byDay = new Map<string, CommitItem[]>();
-  let idx = 0;
+  let dayIdx = 0;
+  let slotsUsed = 0;
 
-  for (let d = 0; d < workdays.length; d++) {
-    const count = baseCount + (d < extra ? 1 : 0);
-    if (count > 0) {
-      byDay.set(workdays[d], sorted.slice(idx, idx + count));
-      idx += count;
+  for (const commit of sorted) {
+    if (slotsUsed >= maxPerDay) {
+      dayIdx++;
+      slotsUsed = 0;
     }
+    // Extend the workday list dynamically if commits overflow the original range
+    if (dayIdx >= workdays.length) {
+      workdays.push(nextWorkday(workdays[workdays.length - 1], wh.workDays));
+    }
+
+    const day = workdays[dayIdx];
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day)!.push(commit);
+    slotsUsed++;
   }
 
-  return buildTasksFromByDay(byDay, wh);
+  return byDay;
 }
 
 // ── public API ────────────────────────────────────────────────────────────────
@@ -152,9 +192,20 @@ export function commitsToDraftTasks(commits: CommitItem[], workHours?: WorkHours
     end: '18:00',
     mode: 'byDate',
     workDays: [1, 2, 3, 4, 5],
+    minDurationMinutes: 60,
   };
 
-  return wh.mode === 'fillWeek' ? fillWeekMode(commits, wh) : byDateMode(commits, wh);
+  const [startH, startM] = wh.start.split(':').map(Number);
+  const [endH, endM] = wh.end.split(':').map(Number);
+  const dayTotalMinutes = endH * 60 + endM - (startH * 60 + startM);
+  const maxPerDay = Math.max(1, Math.floor(dayTotalMinutes / wh.minDurationMinutes));
+
+  const byDay =
+    wh.mode === 'fillWeek'
+      ? buildDayMapFillWeek(commits, wh, maxPerDay)
+      : buildDayMapByDate(commits, maxPerDay);
+
+  return buildTasksFromByDay(byDay, wh);
 }
 
 export function applyGeneratedTitles(

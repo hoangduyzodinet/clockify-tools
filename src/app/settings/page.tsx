@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { AppSettings, defaultSettings, ScheduleMode } from '@/types/settings';
+import { useState, useEffect, useRef } from 'react';
+import { AppSettings, defaultSettings, ScheduleMode, RepoTarget } from '@/types/settings';
 import { loadSettings, saveSettings } from '@/lib/local-storage';
 import { ClockifyUser, ClockifyWorkspace, ClockifyProject } from '@/types/clockify';
 import { ApiResponse } from '@/lib/api-response';
+import { GithubRepo, GithubReposData } from '@/app/api/github/repos/route';
 
 const OPENAI_MODELS = [
   { value: 'gpt-4o-mini', label: 'gpt-4o-mini — fast & cheap' },
@@ -26,6 +27,14 @@ export default function SettingsPage() {
   const [connectError, setConnectError] = useState('');
   const [saved, setSaved] = useState(false);
 
+  // GitHub repo browser
+  const [githubRepoList, setGithubRepoList] = useState<GithubRepo[]>([]);
+  const [repoSearch, setRepoSearch] = useState('');
+  const [loadingRepos, setLoadingRepos] = useState(false);
+  const [repoError, setRepoError] = useState('');
+  const [showRepoBrowser, setShowRepoBrowser] = useState(false);
+  const repoBrowserRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const s = loadSettings();
     setSettings(s);
@@ -33,6 +42,17 @@ export default function SettingsPage() {
       connectClockify(s.clockifyApiKey, s.clockifyWorkspaceId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Close repo browser on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (repoBrowserRef.current && !repoBrowserRef.current.contains(e.target as Node)) {
+        setShowRepoBrowser(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
   async function connectClockify(apiKey: string, savedWorkspaceId?: string) {
@@ -64,13 +84,10 @@ export default function SettingsPage() {
 
       setClockifyUser(userData.data);
       setWorkspaces(wsData.data);
-
       setSettings((prev) => ({ ...prev, clockifyUserId: userData.data.id }));
 
       const wsId = savedWorkspaceId || wsData.data[0]?.id || '';
-      if (wsId) {
-        await fetchProjects(apiKey, wsId);
-      }
+      if (wsId) await fetchProjects(apiKey, wsId);
     } catch (err) {
       setConnectError(err instanceof Error ? err.message : 'Connection failed');
     } finally {
@@ -88,6 +105,60 @@ export default function SettingsPage() {
     if (data.ok) setProjects(data.data);
   }
 
+  async function loadGithubRepos() {
+    if (!settings.githubToken) return;
+    setLoadingRepos(true);
+    setRepoError('');
+    setShowRepoBrowser(true);
+
+    try {
+      const res = await fetch('/api/github/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: settings.githubToken }),
+      });
+      const data: ApiResponse<GithubReposData> = await res.json();
+      if (!data.ok) throw new Error(data.error.message);
+      setGithubRepoList(data.data.repos);
+      // Persist the authenticated user's login so the home page can pre-fill the author filter
+      if (data.data.login) {
+        update('githubUsername', data.data.login);
+      }
+    } catch (err) {
+      setRepoError(err instanceof Error ? err.message : 'Failed to load repositories');
+    } finally {
+      setLoadingRepos(false);
+    }
+  }
+
+  function toggleRepo(r: GithubRepo) {
+    const exists = settings.githubRepos.some(
+      (s) => s.owner === r.owner && s.repo === r.repo,
+    );
+    const next = exists
+      ? settings.githubRepos.filter((s) => !(s.owner === r.owner && s.repo === r.repo))
+      : [...settings.githubRepos, { owner: r.owner, repo: r.repo }];
+    update('githubRepos', next);
+  }
+
+  function removeRepo(idx: number) {
+    update(
+      'githubRepos',
+      settings.githubRepos.filter((_, i) => i !== idx),
+    );
+  }
+
+  function addManualRepo() {
+    update('githubRepos', [...settings.githubRepos, { owner: '', repo: '' }]);
+  }
+
+  function updateRepo(idx: number, field: keyof RepoTarget, value: string) {
+    const next = settings.githubRepos.map((r, i) =>
+      i === idx ? { ...r, [field]: value } : r,
+    );
+    update('githubRepos', next);
+  }
+
   function update<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     setSettings((prev) => ({ ...prev, [key]: value }));
     setSaved(false);
@@ -102,6 +173,10 @@ export default function SettingsPage() {
   const inputClass =
     'w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white';
   const labelClass = 'block text-sm font-medium text-slate-700 mb-1';
+
+  const filteredRepos = githubRepoList.filter((r) =>
+    r.fullName.toLowerCase().includes(repoSearch.toLowerCase()),
+  );
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -121,34 +196,156 @@ export default function SettingsPage() {
           <input
             type="password"
             value={settings.githubToken}
-            onChange={(e) => update('githubToken', e.target.value)}
+            onChange={(e) => {
+              update('githubToken', e.target.value);
+              update('githubUsername', ''); // clear cached username when token changes
+            }}
             placeholder="ghp_..."
             autoComplete="off"
             className={inputClass}
           />
+          {settings.githubUsername && (
+            <p className="mt-1.5 text-xs text-green-600">
+              Connected as <strong>{settings.githubUsername}</strong>
+            </p>
+          )}
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className={labelClass}>Default Owner</label>
-            <input
-              type="text"
-              value={settings.githubOwner}
-              onChange={(e) => update('githubOwner', e.target.value)}
-              placeholder="org-or-username"
-              className={inputClass}
-            />
+        {/* Repositories */}
+        <div>
+          <label className={labelClass}>Repositories</label>
+
+          {settings.githubRepos.length > 0 && (
+            <div className="mb-2 space-y-2">
+              {settings.githubRepos.map((r, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={r.owner}
+                    onChange={(e) => updateRepo(i, 'owner', e.target.value)}
+                    placeholder="owner"
+                    className="w-36 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:outline-none"
+                  />
+                  <span className="text-slate-400">/</span>
+                  <input
+                    type="text"
+                    value={r.repo}
+                    onChange={(e) => updateRepo(i, 'repo', e.target.value)}
+                    placeholder="repository"
+                    className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:outline-none"
+                  />
+                  <button
+                    onClick={() => removeRepo(i)}
+                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={addManualRepo}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+            >
+              + Add manually
+            </button>
+
+            {settings.githubToken && (
+              <div className="relative" ref={repoBrowserRef}>
+                <button
+                  onClick={loadGithubRepos}
+                  disabled={loadingRepos}
+                  className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {loadingRepos ? 'Loading…' : 'Browse from GitHub'}
+                </button>
+
+                {showRepoBrowser && (
+                  <div className="absolute top-full left-0 z-20 mt-1 w-80 rounded-lg border border-slate-200 bg-white shadow-lg">
+                    <div className="border-b border-slate-100 p-2">
+                      <input
+                        autoFocus
+                        type="text"
+                        value={repoSearch}
+                        onChange={(e) => setRepoSearch(e.target.value)}
+                        placeholder="Search repositories…"
+                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-slate-400"
+                      />
+                    </div>
+
+                    {repoError && (
+                      <p className="p-3 text-xs text-red-600">{repoError}</p>
+                    )}
+
+                    <ul className="max-h-64 overflow-y-auto">
+                      {filteredRepos.length === 0 && !repoError && (
+                        <li className="p-3 text-xs text-slate-400">No repositories found.</li>
+                      )}
+                      {filteredRepos.map((r) => {
+                        const selected = settings.githubRepos.some(
+                          (s) => s.owner === r.owner && s.repo === r.repo,
+                        );
+                        return (
+                          <li key={r.fullName}>
+                            <button
+                              onClick={() => toggleRepo(r)}
+                              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50 ${
+                                selected ? 'font-medium text-slate-900' : 'text-slate-700'
+                              }`}
+                            >
+                              <span
+                                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-xs ${
+                                  selected
+                                    ? 'border-slate-800 bg-slate-800 text-white'
+                                    : 'border-slate-300'
+                                }`}
+                              >
+                                {selected && '✓'}
+                              </span>
+                              <span className="truncate">{r.fullName}</span>
+                              {r.private && (
+                                <span className="ml-auto shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
+                                  private
+                                </span>
+                              )}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+        </div>
+
+        {/* Merge commit filter */}
+        <div className="flex items-center justify-between rounded-md border border-slate-100 bg-slate-50 px-4 py-3">
           <div>
-            <label className={labelClass}>Default Repository</label>
-            <input
-              type="text"
-              value={settings.githubRepo}
-              onChange={(e) => update('githubRepo', e.target.value)}
-              placeholder="repository-name"
-              className={inputClass}
-            />
+            <p className="text-sm font-medium text-slate-700">Filter merge commits</p>
+            <p className="text-xs text-slate-400">
+              Exclude commits with more than one parent (e.g. pull request merges).
+            </p>
           </div>
+          <button
+            role="switch"
+            aria-checked={settings.filterMergeCommits}
+            onClick={() => update('filterMergeCommits', !settings.filterMergeCommits)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${
+              settings.filterMergeCommits ? 'bg-slate-800' : 'bg-slate-300'
+            }`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                settings.filterMergeCommits ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
         </div>
       </section>
 
@@ -329,7 +526,6 @@ export default function SettingsPage() {
           </p>
         </div>
 
-        {/* Schedule mode */}
         <div>
           <label className={labelClass}>Schedule mode</label>
           <div className="flex gap-2">
@@ -339,7 +535,7 @@ export default function SettingsPage() {
                 {
                   value: 'fillWeek',
                   label: 'Fill work week',
-                  desc: 'Redistribute across Mon–Fri to fill each day',
+                  desc: 'Redistribute across workdays to fill each day',
                 },
               ] as { value: ScheduleMode; label: string; desc: string }[]
             ).map((opt) => (
@@ -364,7 +560,6 @@ export default function SettingsPage() {
           </p>
         </div>
 
-        {/* Work hours */}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className={labelClass}>Work day start</label>
@@ -386,7 +581,40 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Work days (only relevant for fillWeek) */}
+        {/* Minimum task duration */}
+        <div>
+          <label className={labelClass}>Minimum task duration</label>
+          <div className="flex gap-2">
+            {[
+              { label: '30 min', value: 30 },
+              { label: '1 hour', value: 60 },
+              { label: '2 hours', value: 120 },
+              { label: '4 hours', value: 240 },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => update('minTaskDurationMinutes', opt.value)}
+                className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                  settings.minTaskDurationMinutes === opt.value
+                    ? 'border-slate-800 bg-slate-800 text-white'
+                    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-slate-400">
+            {(() => {
+              const [sh, sm] = settings.workDayStart.split(':').map(Number);
+              const [eh, em] = settings.workDayEnd.split(':').map(Number);
+              const dayMinutes = eh * 60 + em - (sh * 60 + sm);
+              const max = Math.max(1, Math.floor(dayMinutes / settings.minTaskDurationMinutes));
+              return `Up to ${max} task${max !== 1 ? 's' : ''} per day — excess commits overflow to the next day.`;
+            })()}
+          </p>
+        </div>
+
         {settings.scheduleMode === 'fillWeek' && (
           <div>
             <label className={labelClass}>Work days</label>
@@ -424,7 +652,6 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* Summary */}
         {(() => {
           const [sh, sm] = settings.workDayStart.split(':').map(Number);
           const [eh, em] = settings.workDayEnd.split(':').map(Number);
@@ -432,9 +659,8 @@ export default function SettingsPage() {
           const dayHours = dayMinutes / 60;
           const numDays = settings.workDays.length;
 
-          if (dayMinutes <= 0) {
+          if (dayMinutes <= 0)
             return <p className="text-xs text-red-500">End time must be after start time.</p>;
-          }
 
           const h = Math.floor(dayMinutes / 60);
           const m = dayMinutes % 60;

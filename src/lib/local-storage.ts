@@ -13,7 +13,12 @@ export function loadSettings(): AppSettings {
   }
 
   try {
-    return { ...defaultSettings, ...JSON.parse(stored) };
+    const merged: AppSettings = { ...defaultSettings, ...JSON.parse(stored) };
+    // Migrate: promote old single-repo fields into the array
+    if (merged.githubRepos.length === 0 && merged.githubOwner && merged.githubRepo) {
+      merged.githubRepos = [{ owner: merged.githubOwner, repo: merged.githubRepo }];
+    }
+    return merged;
   } catch {
     return defaultSettings;
   }

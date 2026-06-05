@@ -8,4 +8,5 @@ export type CommitItem = {
   date: string;
   url: string;
   repo: string;
+  isMerge: boolean;
 };

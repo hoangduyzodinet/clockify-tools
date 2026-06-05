@@ -55,6 +55,7 @@ export async function fetchGithubCommits(input: FetchCommitsInput): Promise<Comm
       date,
       url: item.html_url,
       repo: `${input.owner}/${input.repo}`,
+      isMerge: item.parents.length > 1,
     };
   });
 }

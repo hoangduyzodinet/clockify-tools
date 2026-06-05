@@ -8,6 +8,7 @@ export type DraftTask = {
   commitUrl: string;
   sourceMessage: string;
   generated: boolean;
+  repo: string; // "owner/repo"
 };
 
 export type ClockifyWorkspace = {
