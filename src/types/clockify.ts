@@ -9,6 +9,7 @@ export type DraftTask = {
   sourceMessage: string;
   generated: boolean;
   repo: string; // "owner/repo"
+  groupSize?: number; // >1 when multiple commits were merged into this task
 };
 
 export type ClockifyWorkspace = {

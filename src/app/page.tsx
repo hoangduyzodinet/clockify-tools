@@ -8,6 +8,7 @@ import { CommitItem } from '@/types/commit';
 import { DraftTask, ClockifySyncResult } from '@/types/clockify';
 import { commitsToDraftTasks, applyGeneratedTitles } from '@/lib/draft-tasks';
 import { ApiResponse } from '@/lib/api-response';
+import { CommitGroup } from '@/lib/ai-titles';
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -17,6 +18,17 @@ function weekAgo() {
   const d = new Date();
   d.setDate(d.getDate() - 7);
   return d.toISOString().slice(0, 10);
+}
+
+function countWorkdays(fromStr: string, toStr: string, workDays: number[]): number {
+  let count = 0;
+  const current = new Date(`${fromStr}T00:00:00`);
+  const end = new Date(`${toStr}T00:00:00`);
+  while (current <= end) {
+    if (workDays.includes(current.getDay())) count++;
+    current.setDate(current.getDate() + 1);
+  }
+  return count;
 }
 
 const inputClass =
@@ -36,14 +48,20 @@ export default function HomePage() {
   const [tasks, setTasks] = useState<DraftTask[]>([]);
   const [syncResults, setSyncResults] = useState<ClockifySyncResult[] | null>(null);
 
+  // Date range for group-and-summarize scheduling (independent from fetch range)
+  const [groupStartDate, setGroupStartDate] = useState(weekAgo());
+  const [groupEndDate, setGroupEndDate] = useState(today());
+
   // Loading states
   const [loadingCommits, setLoadingCommits] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [grouping, setGrouping] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
   // Errors
   const [fetchErrors, setFetchErrors] = useState<string[]>([]);
   const [generateError, setGenerateError] = useState('');
+  const [groupError, setGroupError] = useState('');
   const [syncError, setSyncError] = useState('');
 
   useEffect(() => {
@@ -52,7 +70,18 @@ export default function HomePage() {
     setRepos(
       s.githubRepos.length > 0 ? s.githubRepos : [{ owner: s.githubOwner, repo: s.githubRepo }],
     );
-    setAuthor(s.githubUsername);
+    if (s.githubUsername) {
+      setAuthor(s.githubUsername);
+    } else if (s.githubToken) {
+      fetch('/api/github/user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: s.githubToken }),
+      })
+        .then((r) => r.json())
+        .then((data) => { if (data.ok) setAuthor(data.data.login); })
+        .catch(() => {});
+    }
   }, []);
 
   const missingGitHub = !settings.githubToken;
@@ -122,6 +151,10 @@ export default function HomePage() {
       ? allCommits.filter((c) => !c.isMerge)
       : allCommits;
 
+    // Reset group schedule range to match the fetch range
+    setGroupStartDate(startDate);
+    setGroupEndDate(endDate);
+
     setCommits(filtered);
     setFetchErrors(errors);
     if (filtered.length > 0) {
@@ -164,6 +197,81 @@ export default function HomePage() {
       setGenerateError(err instanceof Error ? err.message : 'Failed to generate titles');
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function groupAndSummarize() {
+    setGrouping(true);
+    setGroupError('');
+
+    const isGemini = settings.aiProvider === 'gemini';
+    try {
+      // Cap targetGroups so we never ask for more groups than commits
+      const numWorkdays = countWorkdays(groupStartDate, groupEndDate, settings.workDays);
+      const targetGroups = Math.max(1, Math.min(numWorkdays, commits.length));
+
+      const res = await fetch('/api/group-tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: settings.aiProvider,
+          apiKey: isGemini ? settings.geminiApiKey : settings.openAiApiKey,
+          model: isGemini ? settings.geminiModel : settings.openAiModel,
+          commits,
+          targetGroups,
+        }),
+      });
+
+      const data: ApiResponse<CommitGroup[]> = await res.json();
+      if (!data.ok) throw new Error(data.error.message);
+
+      const groups = data.data;
+      const workHoursConfig = {
+        start: settings.workDayStart,
+        end: settings.workDayEnd,
+        mode: settings.scheduleMode,
+        workDays: settings.workDays,
+        minDurationMinutes: settings.minTaskDurationMinutes,
+        dateRange: { start: groupStartDate, end: groupEndDate },
+      };
+
+      // Build one representative CommitItem per group (earliest commit in that group).
+      // The scheduler runs on these representatives so time slots are recalculated
+      // as if there are fewer tasks.
+      const representatives = groups
+        .map((g) => {
+          const groupCommits = g.i.map((idx) => commits[idx]).filter(Boolean);
+          if (groupCommits.length === 0) return null;
+          return groupCommits.reduce((earliest, c) =>
+            new Date(c.date) < new Date(earliest.date) ? c : earliest,
+          );
+        })
+        .filter((c): c is NonNullable<typeof c> => c !== null);
+
+      const baseTasks = commitsToDraftTasks(representatives, workHoursConfig);
+
+      // Map each task back to its group using the representative's sha
+      const shaToGroup = new Map<string, CommitGroup>();
+      representatives.forEach((rep, i) => shaToGroup.set(rep.sha, groups[i]));
+
+      setTasks(
+        baseTasks.map((task) => {
+          const group = shaToGroup.get(task.commitSha);
+          if (!group) return task;
+          const groupCommits = group.i.map((idx) => commits[idx]).filter(Boolean);
+          return {
+            ...task,
+            title: group.title,
+            generated: true,
+            groupSize: groupCommits.length,
+            sourceMessage: groupCommits.map((c) => `• ${c.summary}`).join('\n'),
+          };
+        }),
+      );
+    } catch (err) {
+      setGroupError(err instanceof Error ? err.message : 'Failed to group tasks');
+    } finally {
+      setGrouping(false);
     }
   }
 
@@ -330,21 +438,63 @@ export default function HomePage() {
               <h2 className="text-base font-semibold text-slate-800">2. Review & Edit Tasks</h2>
               <p className="mt-0.5 text-sm text-slate-500">
                 {commits.length} commit{commits.length !== 1 ? 's' : ''}
-                {multiRepo && ` across ${validRepos.length} repositories`}. Edit titles, times, or
-                deselect rows before syncing.
+                {multiRepo && ` across ${validRepos.length} repositories`}
+                {tasks.length !== commits.length &&
+                  ` → ${tasks.length} task${tasks.length !== 1 ? 's' : ''}`}
+                . Edit titles, times, or deselect rows before syncing.
               </p>
             </div>
 
             {(settings.aiProvider === 'gemini' ? settings.geminiApiKey : settings.openAiApiKey) && (
-              <div className="flex shrink-0 flex-col items-end gap-1">
-                <button
-                  onClick={generateTitles}
-                  disabled={generating}
-                  className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  {generating ? 'Generating…' : '✨ Generate AI Titles'}
-                </button>
+              <div className="flex shrink-0 flex-col items-end gap-2">
+                <div className="flex gap-2">
+                  <button
+                    onClick={generateTitles}
+                    disabled={generating || grouping}
+                    className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    title="Rename each commit individually"
+                  >
+                    {generating ? 'Generating…' : '✨ Rename Titles'}
+                  </button>
+                  <button
+                    onClick={groupAndSummarize}
+                    disabled={generating || grouping}
+                    className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                    title="Group related commits into fewer summarised tasks, distributed across the date range below"
+                  >
+                    {grouping ? 'Grouping…' : '⚡ Group & Summarize'}
+                  </button>
+                </div>
+
+                {/* Schedule range for group distribution */}
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <span className="font-medium">Schedule:</span>
+                  <input
+                    type="date"
+                    value={groupStartDate}
+                    onChange={(e) => setGroupStartDate(e.target.value)}
+                    className="rounded border border-slate-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  />
+                  <span>→</span>
+                  <input
+                    type="date"
+                    value={groupEndDate}
+                    onChange={(e) => setGroupEndDate(e.target.value)}
+                    className="rounded border border-slate-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  />
+                  {groupStartDate && groupEndDate && (
+                    <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-600">
+                      {Math.max(1, Math.min(
+                        countWorkdays(groupStartDate, groupEndDate, settings.workDays),
+                        commits.length || 1,
+                      ))}{' '}
+                      tasks
+                    </span>
+                  )}
+                </div>
+
                 {generateError && <span className="text-xs text-red-600">{generateError}</span>}
+                {groupError && <span className="text-xs text-red-600">{groupError}</span>}
               </div>
             )}
           </div>
@@ -403,8 +553,16 @@ export default function HomePage() {
                           onChange={(e) => updateTask(task.id, { title: e.target.value })}
                           className="w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 hover:border-slate-300 focus:border-slate-400 focus:bg-white focus:outline-none"
                         />
-                        <div className="mt-0.5 flex gap-2">
-                          {task.generated && (
+                        <div className="mt-0.5 flex flex-wrap gap-2">
+                          {(task.groupSize ?? 1) > 1 && (
+                            <span
+                              className="rounded bg-indigo-50 px-1.5 py-px text-xs font-medium text-indigo-600"
+                              title={task.sourceMessage}
+                            >
+                              {task.groupSize} commits
+                            </span>
+                          )}
+                          {task.generated && (task.groupSize ?? 1) === 1 && (
                             <span className="text-xs text-indigo-500">AI generated</span>
                           )}
                           {multiRepo && (

@@ -8,6 +8,8 @@ export type WorkHours = {
   mode: ScheduleMode;
   workDays: number[]; // 0=Sun … 6=Sat
   minDurationMinutes: number;
+  /** When set, overrides commit dates and distributes tasks across this range. */
+  dateRange?: { start: string; end: string }; // "YYYY-MM-DD"
 };
 
 // ── date helpers ──────────────────────────────────────────────────────────────
@@ -155,13 +157,32 @@ function buildDayMapFillWeek(
 
   if (sorted.length === 0) return new Map();
 
-  const firstDay = localDateString(new Date(sorted[0].date));
-  const lastDay = localDateString(new Date(sorted[sorted.length - 1].date));
+  // Use explicit dateRange when provided; otherwise derive from commit dates.
+  const firstDay = wh.dateRange?.start ?? localDateString(new Date(sorted[0].date));
+  const lastDay = wh.dateRange?.end ?? localDateString(new Date(sorted[sorted.length - 1].date));
 
   const workdays = allWorkdaysInRange(firstDay, lastDay, wh.workDays);
   if (workdays.length === 0) return buildDayMapByDate(commits, maxPerDay);
 
   const byDay = new Map<string, CommitItem[]>();
+
+  if (wh.dateRange) {
+    // Explicit date range: distribute groups evenly across ALL workdays so tasks
+    // spread over the full period rather than bunching on the first few days.
+    const baseCount = Math.floor(sorted.length / workdays.length);
+    const extra = sorted.length % workdays.length;
+    let idx = 0;
+    for (let d = 0; d < workdays.length; d++) {
+      const count = baseCount + (d < extra ? 1 : 0);
+      if (count > 0) {
+        byDay.set(workdays[d], sorted.slice(idx, idx + count));
+        idx += count;
+      }
+    }
+    return byDay;
+  }
+
+  // Normal fillWeek: sequential fill, overflow carries to the next workday.
   let dayIdx = 0;
   let slotsUsed = 0;
 
@@ -200,8 +221,9 @@ export function commitsToDraftTasks(commits: CommitItem[], workHours?: WorkHours
   const dayTotalMinutes = endH * 60 + endM - (startH * 60 + startM);
   const maxPerDay = Math.max(1, Math.floor(dayTotalMinutes / wh.minDurationMinutes));
 
+  // dateRange forces fillWeek distribution regardless of the saved mode setting.
   const byDay =
-    wh.mode === 'fillWeek'
+    wh.mode === 'fillWeek' || wh.dateRange
       ? buildDayMapFillWeek(commits, wh, maxPerDay)
       : buildDayMapByDate(commits, maxPerDay);
 
