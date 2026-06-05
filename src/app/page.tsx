@@ -63,9 +63,7 @@ export default function HomePage() {
   useEffect(() => {
     const s = loadSettings();
     setSettings(s);
-    setRepos(
-      s.githubRepos.length > 0 ? s.githubRepos : [{ owner: s.githubOwner, repo: s.githubRepo }],
-    );
+    setRepos(s.githubRepos);
     if (s.githubUsername) {
       setAuthor(s.githubUsername);
     } else if (s.githubToken) {

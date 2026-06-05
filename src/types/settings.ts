@@ -6,10 +6,6 @@ export type RepoTarget = { owner: string; repo: string };
 export type AppSettings = {
   githubToken: string;
   githubUsername: string; // authenticated user's login, fetched from token
-  /** @deprecated use githubRepos */
-  githubOwner: string;
-  /** @deprecated use githubRepos */
-  githubRepo: string;
   githubRepos: RepoTarget[];
   clockifyApiKey: string;
   clockifyWorkspaceId: string;
@@ -31,8 +27,6 @@ export type AppSettings = {
 export const defaultSettings: AppSettings = {
   githubToken: '',
   githubUsername: '',
-  githubOwner: '',
-  githubRepo: '',
   githubRepos: [],
   clockifyApiKey: '',
   clockifyWorkspaceId: '',

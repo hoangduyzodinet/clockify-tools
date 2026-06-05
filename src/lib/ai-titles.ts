@@ -50,9 +50,6 @@ export function buildGroupPrompt(targetGroups?: number): string {
   );
 }
 
-/** @deprecated Use buildGroupPrompt() instead */
-export const GROUP_SYSTEM_PROMPT = buildGroupPrompt();
-
 export type CommitGroup = {
   title: string;
   i: number[]; // commit indices from the input

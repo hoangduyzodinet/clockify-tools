@@ -13,10 +13,19 @@ export function loadSettings(): AppSettings {
   }
 
   try {
-    const merged: AppSettings = { ...defaultSettings, ...JSON.parse(stored) };
+    const parsed = JSON.parse(stored) as Record<string, unknown>;
+    const merged: AppSettings = { ...defaultSettings, ...parsed };
     // Migrate: promote old single-repo fields into the array
-    if (merged.githubRepos.length === 0 && merged.githubOwner && merged.githubRepo) {
-      merged.githubRepos = [{ owner: merged.githubOwner, repo: merged.githubRepo }];
+    if (
+      merged.githubRepos.length === 0 &&
+      typeof parsed['githubOwner'] === 'string' &&
+      typeof parsed['githubRepo'] === 'string' &&
+      parsed['githubOwner'] &&
+      parsed['githubRepo']
+    ) {
+      merged.githubRepos = [
+        { owner: parsed['githubOwner'] as string, repo: parsed['githubRepo'] as string },
+      ];
     }
     return merged;
   } catch {
