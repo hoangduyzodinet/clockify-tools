@@ -1,35 +1,29 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { AppSettings, defaultSettings, RepoTarget } from '@/types/settings';
 import { loadSettings } from '@/lib/local-storage';
 import { CommitItem } from '@/types/commit';
 import { DraftTask, ClockifySyncResult } from '@/types/clockify';
-import { commitsToDraftTasks, applyGeneratedTitles } from '@/lib/draft-tasks';
+import { commitsToDraftTasks, applyGeneratedTitles, allWorkdaysInRange } from '@/lib/draft-tasks';
 import { ApiResponse } from '@/lib/api-response';
 import { CommitGroup } from '@/lib/ai-titles';
 
+function localDateStr(d: Date) {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return localDateStr(new Date());
 }
 
 function weekAgo() {
   const d = new Date();
   d.setDate(d.getDate() - 7);
-  return d.toISOString().slice(0, 10);
+  return localDateStr(d);
 }
 
-function countWorkdays(fromStr: string, toStr: string, workDays: number[]): number {
-  let count = 0;
-  const current = new Date(`${fromStr}T00:00:00`);
-  const end = new Date(`${toStr}T00:00:00`);
-  while (current <= end) {
-    if (workDays.includes(current.getDay())) count++;
-    current.setDate(current.getDate() + 1);
-  }
-  return count;
-}
 
 const inputClass =
   'w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white';
@@ -63,6 +57,8 @@ export default function HomePage() {
   const [generateError, setGenerateError] = useState('');
   const [groupError, setGroupError] = useState('');
   const [syncError, setSyncError] = useState('');
+
+  const groupingGenRef = useRef(0);
 
   useEffect(() => {
     const s = loadSettings();
@@ -118,8 +114,8 @@ export default function HomePage() {
             token: settings.githubToken,
             owner: r.owner.trim(),
             repo: r.repo.trim(),
-            since: `${startDate}T00:00:00`,
-            until: `${endDate}T23:59:59`,
+            since: new Date(`${startDate}T00:00:00`).toISOString(),
+            until: new Date(`${endDate}T23:59:59`).toISOString(),
             author: author.trim() || undefined,
           }),
         }).then((res) => res.json() as Promise<ApiResponse<CommitItem[]>>),
@@ -201,13 +197,20 @@ export default function HomePage() {
   }
 
   async function groupAndSummarize() {
+    const gen = ++groupingGenRef.current;
     setGrouping(true);
     setGroupError('');
+
+    if (settings.workDays.length === 0) {
+      setGroupError('No working days configured — update Settings.');
+      setGrouping(false);
+      return;
+    }
 
     const isGemini = settings.aiProvider === 'gemini';
     try {
       // Cap targetGroups so we never ask for more groups than commits
-      const numWorkdays = countWorkdays(groupStartDate, groupEndDate, settings.workDays);
+      const numWorkdays = allWorkdaysInRange(groupStartDate, groupEndDate, settings.workDays).length;
       const targetGroups = Math.max(1, Math.min(numWorkdays, commits.length));
 
       const res = await fetch('/api/group-tasks', {
@@ -235,25 +238,26 @@ export default function HomePage() {
         dateRange: { start: groupStartDate, end: groupEndDate },
       };
 
-      // Build one representative CommitItem per group (earliest commit in that group).
-      // The scheduler runs on these representatives so time slots are recalculated
-      // as if there are fewer tasks.
-      const representatives = groups
+      // Pair each group with its earliest commit (representative) so indices
+      // stay aligned after null entries are filtered out.
+      const pairedGroups = groups
         .map((g) => {
           const groupCommits = g.i.map((idx) => commits[idx]).filter(Boolean);
           if (groupCommits.length === 0) return null;
-          return groupCommits.reduce((earliest, c) =>
-            new Date(c.date) < new Date(earliest.date) ? c : earliest,
+          const rep = groupCommits.reduce((earliest, c) =>
+            c.date < earliest.date ? c : earliest,
           );
+          return { rep, group: g };
         })
-        .filter((c): c is NonNullable<typeof c> => c !== null);
+        .filter((x): x is NonNullable<typeof x> => x !== null);
 
+      const representatives = pairedGroups.map((x) => x.rep);
       const baseTasks = commitsToDraftTasks(representatives, workHoursConfig);
 
-      // Map each task back to its group using the representative's sha
       const shaToGroup = new Map<string, CommitGroup>();
-      representatives.forEach((rep, i) => shaToGroup.set(rep.sha, groups[i]));
+      pairedGroups.forEach(({ rep, group }) => shaToGroup.set(rep.sha, group));
 
+      if (groupingGenRef.current !== gen) return;
       setTasks(
         baseTasks.map((task) => {
           const group = shaToGroup.get(task.commitSha);
@@ -269,9 +273,11 @@ export default function HomePage() {
         }),
       );
     } catch (err) {
-      setGroupError(err instanceof Error ? err.message : 'Failed to group tasks');
+      if (groupingGenRef.current === gen) {
+        setGroupError(err instanceof Error ? err.message : 'Failed to group tasks');
+      }
     } finally {
-      setGrouping(false);
+      if (groupingGenRef.current === gen) setGrouping(false);
     }
   }
 
@@ -288,7 +294,11 @@ export default function HomePage() {
           apiKey: settings.clockifyApiKey,
           workspaceId: settings.clockifyWorkspaceId,
           projectId: settings.clockifyProjectId || undefined,
-          tasks: selectedTasks,
+          tasks: selectedTasks.map((t) => ({
+            ...t,
+            start: new Date(t.start).toISOString(),
+            end: new Date(t.end).toISOString(),
+          })),
         }),
       });
 
@@ -485,7 +495,7 @@ export default function HomePage() {
                   {groupStartDate && groupEndDate && (
                     <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-600">
                       {Math.max(1, Math.min(
-                        countWorkdays(groupStartDate, groupEndDate, settings.workDays),
+                        allWorkdaysInRange(groupStartDate, groupEndDate, settings.workDays).length,
                         commits.length || 1,
                       ))}{' '}
                       tasks

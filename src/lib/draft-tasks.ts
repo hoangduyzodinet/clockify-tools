@@ -43,6 +43,7 @@ function nextCalendarDay(day: string): string {
 }
 
 function nextWorkday(day: string, workDays: number[]): string {
+  if (workDays.length === 0) return nextCalendarDay(day);
   const d = new Date(`${day}T00:00:00`);
   do {
     d.setDate(d.getDate() + 1);
@@ -50,7 +51,7 @@ function nextWorkday(day: string, workDays: number[]): string {
   return localDateString(d);
 }
 
-function allWorkdaysInRange(fromStr: string, toStr: string, workDays: number[]): string[] {
+export function allWorkdaysInRange(fromStr: string, toStr: string, workDays: number[]): string[] {
   const days: string[] = [];
   const current = new Date(`${fromStr}T00:00:00`);
   const end = new Date(`${toStr}T00:00:00`);
@@ -162,7 +163,10 @@ function buildDayMapFillWeek(
   const lastDay = wh.dateRange?.end ?? localDateString(new Date(sorted[sorted.length - 1].date));
 
   const workdays = allWorkdaysInRange(firstDay, lastDay, wh.workDays);
-  if (workdays.length === 0) return buildDayMapByDate(commits, maxPerDay);
+  if (workdays.length === 0) {
+    if (wh.dateRange) return new Map();
+    return buildDayMapByDate(commits, maxPerDay);
+  }
 
   const byDay = new Map<string, CommitItem[]>();
 

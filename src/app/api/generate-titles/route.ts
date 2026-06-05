@@ -10,6 +10,12 @@ export async function POST(req: NextRequest) {
     if (!apiKey || !model || !Array.isArray(commits) || commits.length === 0) {
       return failure('Missing required fields: apiKey, model, commits');
     }
+    if (commits.length > 500) {
+      return failure('Too many commits: maximum 500 per request');
+    }
+    if (!/^[\w.:-]{1,100}$/.test(model)) {
+      return failure('Invalid model identifier');
+    }
 
     const titles =
       provider === 'gemini'
